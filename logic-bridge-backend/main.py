@@ -1,47 +1,62 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict
+from typing import Dict, List
+import re
 
 app = FastAPI()
 
-# This middleware tells the server to accept cross-origin requests from the Figma UI
+# Enable CORS so your Figma plugin and VS Code can talk to this server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-class FigmaComponent(BaseModel):
-    component_name: str
-    states: Dict[str, str]
+# AI Logic Patterns for state prediction
+LOGIC_PATTERNS = {
+    "isLoading": r"(loading|skeleton|shimmer|wait|process)",
+    "hasError": r"(error|failed|warning|alert|wrong)",
+    "isEmpty": r"(empty|no_data|blank|not_found)",
+    "isSuccess": r"(success|main|content|active|loaded)"
+}
+
+def predict_logic_state(node_name: str) -> str:
+    name_lower = node_name.lower()
+    for state, pattern in LOGIC_PATTERNS.items():
+        if re.search(pattern, name_lower):
+            return state
+    return "isSuccess"
+
+class PredictionRequest(BaseModel):
+    node_names: List[str]
+
+@app.get("/")
+async def root():
+    return {"message": "Logic-Bridge AI Backend is Running"}
+
+@app.post("/predict-states")
+async def predict_states(data: PredictionRequest):
+    predictions = {name: predict_logic_state(name) for name in data.node_names}
+    return {"status": "success", "predictions": predictions}
 
 @app.post("/generate-flutter")
-async def generate_flutter_code(data: FigmaComponent):
-    print(f"✅ Received data for: {data.component_name}")
+async def generate_flutter(data: dict):
+    # This is the endpoint your VS Code extension calls
+    comp_name = data.get("component_name", "MyComponent")
     
-    # We generate the Dart boilerplate dynamically based on the states we receive
-    dart_code = f"""
-class {data.component_name}Controller extends StatelessWidget {{
-  final AppState state;
-  const {data.component_name}Controller({{Key? key, required this.state}}) : super(key: key);
+    flutter_code = f"""
+class {comp_name}Controller extends StatelessWidget {{
+  final bool isLoading;
+  
+  const {comp_name}Controller({{super.key, required this.isLoading}});
 
   @override
   Widget build(BuildContext context) {{
+    if (isLoading) return const {comp_name}Skeleton();
+    return const {comp_name}Main();
+  }}
+}}
 """
-    if "isLoading" in data.states:
-        dart_code += f"    if (state.isLoading) return const {data.states['isLoading']}();\n"
-    if "hasError" in data.states:
-        dart_code += f"    if (state.hasError) return const {data.states['hasError']}();\n"
-    if "isEmpty" in data.states:
-        dart_code += f"    if (state.isEmpty) return const {data.states['isEmpty']}();\n"
-        
-    dart_code += f"    return const {data.states.get('isSuccess', data.component_name + 'Main')}();\n  }}\n}}"
-
-    return {
-        "status": "success",
-        "component": data.component_name,
-        "flutter_code": dart_code
-    }
+    return {"flutter_code": flutter_code}

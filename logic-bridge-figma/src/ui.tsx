@@ -1,5 +1,5 @@
 import { h } from "preact";
-import { useState } from "preact/hooks";
+import { useState, useEffect } from "preact/hooks";
 import {
   render,
   Container,
@@ -20,6 +20,40 @@ function PluginUI() {
     { value: "isEmpty", text: "Empty (No Data)" },
   ];
 
+  // 1. Listen for the "SEND_SELECTED_NAME" message from main.ts
+  useEffect(() => {
+    window.onmessage = async (event) => {
+      const msg = event.data.pluginMessage;
+
+      if (msg.type === "SEND_SELECTED_NAME") {
+        const realNodeName = msg.nodeName;
+
+        try {
+          // 2. Send the real name to the Python AI Backend
+          const response = await fetch("http://127.0.0.1:8000/predict-states", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ node_names: [realNodeName] }),
+          });
+
+          const data = await response.json();
+          const suggestedState = data.predictions[realNodeName];
+
+          // 3. Update the UI state based on AI suggestion
+          setLogicState(suggestedState);
+          alert(
+            `🤖 AI analyzed "${realNodeName}" and suggests: ${suggestedState}`,
+          );
+        } catch (error) {
+          console.error("AI Error:", error);
+          alert(
+            "Could not reach the AI Backend. Is your Python server running?",
+          );
+        }
+      }
+    };
+  }, []);
+
   const handleTagComponent = () => {
     parent.postMessage(
       {
@@ -32,42 +66,18 @@ function PluginUI() {
     );
   };
 
-  // NEW: The function that talks to your Python backend
-  const handleTestExport = async () => {
-    try {
-      // We are sending a mock JSON payload of a tagged CampusConnect component
-      const payload = {
-        component_name: "LostItemCard",
-        states: {
-          isLoading: "ItemSkeletonLoader",
-          isEmpty: "NoItemsFoundState",
-          isSuccess: "ItemDetailsMain",
-        },
-      };
-
-      const response = await fetch("http://127.0.0.1:8000/generate-flutter", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await response.json();
-
-      // Log the generated Dart code to the console and alert the user
-      console.log("🔥 Auto-Generated Dart Code:\\n", data.flutter_code);
-      alert(
-        "Success! Check the Figma Developer Console for the generated Flutter code.",
-      );
-    } catch (error) {
-      console.error("API Error:", error);
-      alert("Failed to connect to the Python server. Is Uvicorn running?");
-    }
+  const handleAISuggest = () => {
+    // Request the real selection name from the Figma main thread
+    parent.postMessage({ pluginMessage: { type: "GET_SELECTED_NAME" } }, "*");
   };
 
   return (
     <Container space="medium">
       <VerticalSpace space="large" />
-      <Text>Select a frame, choose its logic state, and tag it.</Text>
+      <Text muted>
+        Select a frame, then use AI to suggest its logic state or choose
+        manually.
+      </Text>
       <VerticalSpace space="large" />
 
       <Dropdown
@@ -75,17 +85,24 @@ function PluginUI() {
         options={stateOptions}
         value={logicState}
       />
-      <VerticalSpace space="large" />
+
+      <VerticalSpace space="extraLarge" />
 
       <Button fullWidth onClick={handleTagComponent}>
         Tag Selected Frame
       </Button>
-      <VerticalSpace space="medium" />
 
-      {/* NEW: The button to test the API connection */}
-      <Button fullWidth secondary onClick={handleTestExport}>
-        Test Code Generation
+      <VerticalSpace space="small" />
+
+      <Button
+        fullWidth
+        secondary
+        onClick={handleAISuggest}
+        style={{ color: "#8b5cf6", borderColor: "#8b5cf6" }}
+      >
+        ✨ AI Suggest State
       </Button>
+
       <VerticalSpace space="small" />
     </Container>
   );
